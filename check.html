@@ -1,76 +1,83 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang='ru'>
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
 <title>Проверка подлинности документа</title>
 <style>
   body { font-family: Arial, sans-serif; font-size: 18px; margin: 20px; }
   #result { font-size: 24px; font-weight: bold; margin-bottom: 16px; }
+  #text { white-space: pre-wrap; padding: 12px; border: 3px solid; }
   .ok { color: #1b7d32; }
   .bad { color: #c62828; }
-  #text { white-space: pre-wrap; }
+  #text.ok, #text.bad { color: #000; }
+  #text.ok { border-color: #1b7d32; }
+  #text.bad { border-color: #c62828; }
 </style>
 </head>
 <body>
-<div id="result">Проверка…</div>
-<div id="text"></div>
+<div id='result'>Проверка…</div>
+<div id='text' hidden></div>
+<p id='note'></p>
 
 <script>
-// Открытые ключи, которым доверяет страница. Числа e и n скопируйте из программы.
-const KEYS = [
-  { owner: "МБОУ «Лицей имени Н.Г. Булакина»", e: "65537", n: "19995397946568578474601607267298292882934887383513889732164418723890194892176174909037424973571663420847705674108949587907016911839216543918611503705864206398635642947579503421885985107612528743736540812796944374116819755375721303983157346681064684408531099418809215216595651391018877661227390282245587523766086277779972355028667430651944216798311390436389477942797417565333941281310789061296759031144059381113924669527076166821330146389444501060921871964432983035941907775905168346268499847395704278600247716848094480403698584949450239132603698132234955197980760008762278715113199158579713895092913418685056079908733" }
-];
+// Открытый ключ (e, n) — его записывает программа кнопкой «Сохранить ключ в репозиторий»
+const KEY = { e: '65537', n: '20569086471751328194261631799376724660688808692816422041245819959261015554073600861143711324036571038929287591726622393791350391756815925773982193054781699001018622391549050405795152204732536522251053490337402919962749734579203947974368243020002139476595138609317976266612248245372339246140708844110188477238365553011994039822538454173338219760523589151319320860703393384372294457981738512246940231847249184519049812049193533411484520705724976271793473229927371122124473702928427584277242711149068181994043651131895451697674925670764499280875370880152081322466136192912764015305822171734053058792686721863466663044439' };
 
 // Base64url (из ссылки) → байты
 function fromBase64Url(s) {
-  s = s.replace(/-/g, "+").replace(/_/g, "/");
-  while (s.length % 4) s += "=";
+  s = s.replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
   return Uint8Array.from(atob(s), c => c.charCodeAt(0));
 }
 
 // Десятичное число → Base64url (в таком виде ключ принимает браузер)
 function toBase64Url(decimal) {
   let hex = BigInt(decimal).toString(16);
-  if (hex.length % 2) hex = "0" + hex;
+  if (hex.length % 2) hex = '0' + hex;
   const bytes = hex.match(/../g).map(h => parseInt(h, 16));
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-function show(className, result, text) {
-  document.getElementById("result").className = className;
-  document.getElementById("result").textContent = result;
-  document.getElementById("text").textContent = text || "";
+function show(className, result, text, note) {
+  const r = document.getElementById('result'), t = document.getElementById('text');
+  r.className = t.className = className;
+  r.textContent = result;
+  t.textContent = text || '';
+  t.hidden = !text;
+  document.getElementById('note').textContent = note || '';
 }
 
 async function check() {
-  const parts = location.hash.slice(1).split(".");   // ссылка: ...check.html#текст.подпись
-  if (parts.length !== 2) return show("bad", "В ссылке нет документа для проверки.");
+  const parts = location.hash.slice(1).split('.');   // ссылка: ...check.html#текст.подпись
+  if (parts.length !== 2) return show('bad', 'В ссылке нет документа для проверки.');
 
   let data, signature;
   try {
     data = fromBase64Url(parts[0]);
     signature = fromBase64Url(parts[1]);
   } catch (e) {
-    return show("bad", "QR-код повреждён.");
+    return show('bad', 'QR-код повреждён.');
   }
+  const text = new TextDecoder().decode(data);
 
-  for (const k of KEYS) {
-    try {
-      const key = await crypto.subtle.importKey("jwk",
-        { kty: "RSA", e: toBase64Url(k.e), n: toBase64Url(k.n), alg: "RS256", ext: true },
-        { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
-      if (await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, signature, data)) {
-        return show("ok", "✔ Документ подлинный. Выдан: " + k.owner,
-          new TextDecoder().decode(data) + "\n\nСверьте эти данные с текстом на бумаге.");
-      }
-    } catch (e) { }   // ключ не подошёл — пробуем следующий
-  }
-  show("bad", "✘ Подпись не совпадает: документ изменён или выдан другой организацией.");
+  let valid = false;
+  try {
+    const key = await crypto.subtle.importKey('jwk',
+      { kty: 'RSA', e: toBase64Url(KEY.e), n: toBase64Url(KEY.n), alg: 'RS256', ext: true },
+      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+    valid = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, signature, data);
+  } catch (e) { }
+
+  if (valid)
+    show('ok', '✔ Документ подлинный', text, 'Сверьте эти данные с текстом на бумаге.');
+  else
+    show('bad', '✘ ВНИМАНИЕ: документ поддельный или изменён!', text,
+         'Подпись не совпадает — этому тексту доверять нельзя.');
 }
 
 if (window.crypto && crypto.subtle) check();
-else show("bad", "Откройте страницу по адресу, который начинается с https://");
+else show('bad', 'Откройте страницу по адресу, который начинается с https://');
 </script>
 </body>
 </html>
